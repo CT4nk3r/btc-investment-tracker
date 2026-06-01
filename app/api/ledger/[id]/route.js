@@ -6,19 +6,26 @@ import { deleteLedgerRow } from "@/lib/ledger-server";
 export const runtime = "nodejs";
 
 export async function DELETE(_request, { params }) {
-  if (!hasClerkEnv() || !hasDatabaseEnv()) {
+  try {
+    if (!hasClerkEnv() || !hasDatabaseEnv()) {
+      return NextResponse.json(
+        { error: "Public release is not configured yet. Add Clerk and Neon environment variables." },
+        { status: 503 },
+      );
+    }
+
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { id } = await params;
+    await deleteLedgerRow(userId, id);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
     return NextResponse.json(
-      { error: "Public release is not configured yet. Add Clerk and Neon environment variables." },
-      { status: 503 },
+      { error: error.message || "Could not delete row" },
+      { status: error.status || 500 },
     );
   }
-
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { id } = await params;
-  await deleteLedgerRow(userId, id);
-  return NextResponse.json({ ok: true });
 }

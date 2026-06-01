@@ -6,19 +6,26 @@ import { insertLedgerRow, listLedgerRows } from "@/lib/ledger-server";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const gate = await requirePublicRuntime();
-  if (gate) return gate;
+  try {
+    const gate = await requirePublicRuntime();
+    if (gate) return gate;
 
-  const { userId } = await auth();
-  const rows = await listLedgerRows(userId);
-  return NextResponse.json({ rows });
+    const { userId } = await auth();
+    const rows = await listLedgerRows(userId);
+    return NextResponse.json({ rows });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error.message || "Could not load ledger" },
+      { status: error.status || 500 },
+    );
+  }
 }
 
 export async function POST(request) {
-  const gate = await requirePublicRuntime();
-  if (gate) return gate;
-
   try {
+    const gate = await requirePublicRuntime();
+    if (gate) return gate;
+
     const { userId } = await auth();
     const input = await request.json();
     const row = await insertLedgerRow(userId, input);

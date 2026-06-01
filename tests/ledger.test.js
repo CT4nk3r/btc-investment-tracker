@@ -25,6 +25,29 @@ describe("ledger parsing", () => {
     });
   });
 
+  it("parses spent/paid wording and common aliases", () => {
+    expect(parseTrade("I spent 10 bucks on 0.001 bittcoin")).toEqual({
+      buyAmount: 0.001,
+      buyAsset: "BTC",
+      sellAmount: 10,
+      sellAsset: "USD",
+    });
+
+    expect(parseTrade("paid 3900 forint for 10 usd coin")).toEqual({
+      buyAmount: 10,
+      buyAsset: "USDC",
+      sellAmount: 3900,
+      sellAsset: "HUF",
+    });
+
+    expect(parseTrade("Bought 0,002 bitcion with 80 tether")).toEqual({
+      buyAmount: 0.002,
+      buyAsset: "BTC",
+      sellAmount: 80,
+      sellAsset: "USDT",
+    });
+  });
+
   it("rejects unsupported assets and malformed phrases", () => {
     expect(parseTrade("I bought pizza")).toBeNull();
     expect(parseTrade("I bought 10 xyz for 9 euro")).toBeNull();

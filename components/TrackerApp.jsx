@@ -34,6 +34,7 @@ import {
   sortRows,
   withoutSampleRows,
 } from "@/lib/ledger";
+import { readJsonResponse } from "@/lib/http";
 
 export default function TrackerApp() {
   const [rows, setRows] = useState([]);
@@ -74,7 +75,7 @@ export default function TrackerApp() {
     setServerError("");
     try {
       const response = await fetch("/api/ledger", { cache: "no-store" });
-      const data = await response.json();
+      const data = (await readJsonResponse(response)) || {};
       if (!response.ok) throw new Error(data.error || "Could not load ledger");
       setRows(sortRows(data.rows || []));
     } catch (error) {
@@ -129,7 +130,7 @@ export default function TrackerApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       });
-      const data = await response.json();
+      const data = (await readJsonResponse(response)) || {};
       if (!response.ok) throw new Error(data.error || "Could not save trade");
       setRows((current) => sortRows([data.row, ...current]));
       setPhrase("");
@@ -149,7 +150,7 @@ export default function TrackerApp() {
 
     try {
       const response = await fetch(`/api/ledger/${encodeURIComponent(id)}`, { method: "DELETE" });
-      const data = await response.json();
+      const data = (await readJsonResponse(response)) || {};
       if (!response.ok) throw new Error(data.error || "Could not delete row");
     } catch (error) {
       setRows(previous);
@@ -229,7 +230,7 @@ export default function TrackerApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode, rows: importRowsToSave }),
       });
-      const data = await response.json();
+      const data = (await readJsonResponse(response)) || {};
       if (!response.ok) throw new Error(data.error || "Could not import rows");
       setRows(sortRows(data.rows || []));
       setImportPreview(null);
@@ -290,7 +291,7 @@ export default function TrackerApp() {
               id="phrase"
               value={phrase}
               onChange={(event) => setPhrase(event.target.value)}
-              placeholder='I bought 100 usdc for 89 euro'
+              placeholder='I spent 10 bucks on 0.001 bittcoin'
             />
             <button className="primary" onClick={addTrade} disabled={isSaving || (!parsed && !manual)}>
               <Plus size={18} />
@@ -390,7 +391,7 @@ function readLegacyRows() {
 
 function TradePreview({ parsed }) {
   if (!parsed) {
-    return <p className="hint">Supported format: "I bought 0.002 btc for 80 usdc". Use manual entry for anything unusual.</p>;
+    return <p className="hint">Try "I bought 0.002 btc for 80 usdc" or "I spent 10 bucks on 0.001 bittcoin".</p>;
   }
   return (
     <p className="parsed">
