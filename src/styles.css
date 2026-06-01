@@ -718,6 +718,25 @@ td {
   width: 38px;
 }
 
+.row-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.asset-edit {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(90px, 1fr) 88px;
+  min-width: 190px;
+}
+
+.edit-row input,
+.edit-row select {
+  min-height: 36px;
+  padding: 0 9px;
+}
+
 .empty {
   color: var(--muted);
   margin: 0;

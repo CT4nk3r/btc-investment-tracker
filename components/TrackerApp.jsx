@@ -10,11 +10,14 @@ import {
   FileJson,
   FileSpreadsheet,
   Landmark,
+  Pencil,
   Plus,
   RefreshCcw,
+  Save,
   Trash2,
   Upload,
   WalletCards,
+  X,
 } from "lucide-react";
 import {
   ASSETS,
@@ -48,6 +51,8 @@ export default function TrackerApp() {
   const [importError, setImportError] = useState("");
   const [legacyRows, setLegacyRows] = useState([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
   const [rates, setRates] = useState(() => {
     if (typeof window === "undefined") return null;
     try {
@@ -155,6 +160,66 @@ export default function TrackerApp() {
     } catch (error) {
       setRows(previous);
       setServerError(error.message || "Could not delete row");
+    }
+  }
+
+  function startEdit(row) {
+    setServerError("");
+    setEditingId(row.id);
+    setEditDraft({
+      date: row.date,
+      buyAmount: String(row.buyAmount),
+      buyAsset: row.buyAsset,
+      sellAmount: String(row.sellAmount),
+      sellAsset: row.sellAsset,
+      note: row.note || "",
+      raw: row.raw || "",
+      createdAt: row.createdAt,
+    });
+  }
+
+  function updateEditDraft(key, value) {
+    setEditDraft((current) => ({ ...(current || {}), [key]: value }));
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditDraft(null);
+  }
+
+  async function saveEdit(id) {
+    if (!editDraft) return;
+
+    const buyAmount = parseDraftAmount(editDraft.buyAmount);
+    const sellAmount = parseDraftAmount(editDraft.sellAmount);
+    if (!Number.isFinite(buyAmount) || buyAmount <= 0 || !Number.isFinite(sellAmount) || sellAmount <= 0) {
+      setServerError("Edit needs positive bought and paid amounts.");
+      return;
+    }
+
+    setIsSaving(true);
+    setServerError("");
+    try {
+      const response = await fetch(`/api/ledger/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...editDraft,
+          buyAmount,
+          sellAmount,
+          raw:
+            editDraft.raw ||
+            `${buyAmount} ${editDraft.buyAsset} for ${sellAmount} ${editDraft.sellAsset}`,
+        }),
+      });
+      const data = (await readJsonResponse(response)) || {};
+      if (!response.ok) throw new Error(data.error || "Could not update row");
+      setRows((current) => sortRows(current.map((row) => (row.id === id ? data.row : row))));
+      cancelEdit();
+    } catch (error) {
+      setServerError(error.message || "Could not update row");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -372,7 +437,19 @@ export default function TrackerApp() {
             onCancel={() => setImportPreview(null)}
           />
         ) : null}
-        <Ledger rows={rows} removeTrade={removeTrade} rates={rates} isLoading={isLoadingRows} />
+        <Ledger
+          rows={rows}
+          removeTrade={removeTrade}
+          rates={rates}
+          isLoading={isLoadingRows}
+          editingId={editingId}
+          editDraft={editDraft}
+          isSaving={isSaving}
+          startEdit={startEdit}
+          updateEditDraft={updateEditDraft}
+          saveEdit={saveEdit}
+          cancelEdit={cancelEdit}
+        />
       </section>
     </main>
   );
@@ -387,6 +464,10 @@ function readLegacyRows() {
   } catch {
     return [];
   }
+}
+
+function parseDraftAmount(value) {
+  return Number(String(value || "").replace(",", "."));
 }
 
 function TradePreview({ parsed }) {
@@ -537,7 +618,19 @@ function TaxSummary({ rows, lots, fxLoss, rates }) {
   );
 }
 
-function Ledger({ rows, removeTrade, rates, isLoading }) {
+function Ledger({
+  rows,
+  removeTrade,
+  rates,
+  isLoading,
+  editingId,
+  editDraft,
+  isSaving,
+  startEdit,
+  updateEditDraft,
+  saveEdit,
+  cancelEdit,
+}) {
   if (isLoading) return <p className="empty">Loading ledger...</p>;
 
   return (
@@ -555,23 +648,87 @@ function Ledger({ rows, removeTrade, rates, isLoading }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.id}>
-              <td>{row.date}</td>
-              <td>{formatAmount(row.buyAmount, row.buyAsset)}</td>
-              <td>{formatAmount(row.sellAmount, row.sellAsset)}</td>
-              <td>
-                {formatAmount(row.sellAmount / row.buyAmount, row.sellAsset)} / {row.buyAsset}
-              </td>
-              <td>{formatFxCheck(row, rates)}</td>
-              <td>{row.note || row.raw}</td>
-              <td>
-                <button className="icon-btn" onClick={() => removeTrade(row.id)} aria-label="Delete row">
-                  <Trash2 size={16} />
-                </button>
-              </td>
-            </tr>
-          ))}
+          {rows.map((row) =>
+            editingId === row.id && editDraft ? (
+              <tr key={row.id} className="edit-row">
+                <td>
+                  <input
+                    type="date"
+                    value={editDraft.date}
+                    onChange={(event) => updateEditDraft("date", event.target.value)}
+                  />
+                </td>
+                <td>
+                  <div className="asset-edit">
+                    <input
+                      value={editDraft.buyAmount}
+                      onChange={(event) => updateEditDraft("buyAmount", event.target.value)}
+                      inputMode="decimal"
+                    />
+                    <select value={editDraft.buyAsset} onChange={(event) => updateEditDraft("buyAsset", event.target.value)}>
+                      {ASSETS.map((asset) => (
+                        <option key={asset}>{asset}</option>
+                      ))}
+                    </select>
+                  </div>
+                </td>
+                <td>
+                  <div className="asset-edit">
+                    <input
+                      value={editDraft.sellAmount}
+                      onChange={(event) => updateEditDraft("sellAmount", event.target.value)}
+                      inputMode="decimal"
+                    />
+                    <select value={editDraft.sellAsset} onChange={(event) => updateEditDraft("sellAsset", event.target.value)}>
+                      {ASSETS.map((asset) => (
+                        <option key={asset}>{asset}</option>
+                      ))}
+                    </select>
+                  </div>
+                </td>
+                <td>
+                  {parseDraftAmount(editDraft.buyAmount) > 0 && parseDraftAmount(editDraft.sellAmount) > 0
+                    ? `${formatAmount(parseDraftAmount(editDraft.sellAmount) / parseDraftAmount(editDraft.buyAmount), editDraft.sellAsset)} / ${editDraft.buyAsset}`
+                    : "Invalid"}
+                </td>
+                <td>{formatFxCheck({ ...row, ...editDraft, buyAmount: parseDraftAmount(editDraft.buyAmount), sellAmount: parseDraftAmount(editDraft.sellAmount) }, rates)}</td>
+                <td>
+                  <input value={editDraft.note} onChange={(event) => updateEditDraft("note", event.target.value)} placeholder="Note" />
+                </td>
+                <td>
+                  <div className="row-actions">
+                    <button className="icon-btn" onClick={() => saveEdit(row.id)} disabled={isSaving} aria-label="Save row">
+                      <Save size={16} />
+                    </button>
+                    <button className="icon-btn" onClick={cancelEdit} disabled={isSaving} aria-label="Cancel edit">
+                      <X size={16} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              <tr key={row.id}>
+                <td>{row.date}</td>
+                <td>{formatAmount(row.buyAmount, row.buyAsset)}</td>
+                <td>{formatAmount(row.sellAmount, row.sellAsset)}</td>
+                <td>
+                  {formatAmount(row.sellAmount / row.buyAmount, row.sellAsset)} / {row.buyAsset}
+                </td>
+                <td>{formatFxCheck(row, rates)}</td>
+                <td>{row.note || row.raw}</td>
+                <td>
+                  <div className="row-actions">
+                    <button className="icon-btn" onClick={() => startEdit(row)} aria-label="Edit row">
+                      <Pencil size={16} />
+                    </button>
+                    <button className="icon-btn" onClick={() => removeTrade(row.id)} aria-label="Delete row">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ),
+          )}
         </tbody>
       </table>
     </div>
