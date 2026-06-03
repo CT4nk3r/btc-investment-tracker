@@ -23,6 +23,8 @@ NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/dashboard
 DATABASE_URL=
 ```
 
+Wallet transaction history uses Blockscout's public API, so there is no additional required environment variable or secret for the current provider. If a keyed explorer provider is added later, keep its API key server-side and configure it for Preview and Production environments.
+
 ## Database
 
 Run [db/schema.sql](db/schema.sql) in Neon before opening the app to users.
@@ -67,4 +69,5 @@ Vercel should use:
 - Vercel env vars set for Production and Preview.
 - `npm run build` passes.
 - Register, login, add trade, delete trade, import JSON, export JSON, export CSV verified.
+- Wallet activity lookup verified for a supported EVM address and date range.
 - Terms/privacy text added if this will be used by people beyond you.

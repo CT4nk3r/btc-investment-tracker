@@ -4,7 +4,7 @@ import { hasClerkEnv } from "@/lib/env";
 
 export const metadata = {
   title: "BTC Investment Tracker",
-  description: "Authenticated crypto tax ledger for tracking fiat, stablecoin, and BTC buys.",
+  description: "Authenticated crypto tax ledger and EVM wallet activity tracker.",
 };
 
 export default function RootLayout({ children }) {
