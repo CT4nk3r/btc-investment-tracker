@@ -36,6 +36,18 @@ describe("cost basis", () => {
     expect(summarizeLotBasis(lots.pools.WBTC)).toEqual({ EUR: 90 });
   });
 
+  it("preserves EUR basis through EURC and USDC conversions", () => {
+    const rows = [
+      row("buy-eurc", "2026-05-01", 100, "EURC", 100, "EUR"),
+      row("buy-usdc", "2026-05-01", 115, "USDC", 100, "EURC"),
+      row("buy-wbtc", "2026-06-02", 0.00164219, "WBTC", 100, "USDC"),
+    ];
+
+    const lots = calculateLots(rows);
+    expect(lots.pools.WBTC[0].costEur).toBeCloseTo(86.9565217391);
+    expect(summarizeLotBasis(lots.pools.WBTC)).toEqual({ EUR: expect.any(Number) });
+  });
+
   it("keeps genuinely unknown external deposits unknown", () => {
     const lots = calculateLots([
       row("receive-usdc", "2026-06-01", 100, "USDC", 100, "EXTERNAL_WALLET"),

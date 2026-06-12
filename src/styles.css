@@ -448,6 +448,30 @@ h2 {
   padding: 22px;
 }
 
+.funding-panel {
+  margin-bottom: 18px;
+}
+
+.funding-grid {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(130px, 0.7fr)) minmax(180px, 1fr) auto;
+}
+
+.funding-grid label {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.funding-grid input {
+  margin-top: 6px;
+}
+
+.funding-grid .primary {
+  min-height: 42px;
+}
+
 .entry-main label {
   color: var(--entry-label);
   display: block;
@@ -927,6 +951,7 @@ code {
 @media (max-width: 920px) {
   .topbar,
   .entry-band,
+  .funding-grid,
   .content-grid,
   .public-hero,
   .wallet-search-grid {

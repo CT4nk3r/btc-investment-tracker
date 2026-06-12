@@ -7,6 +7,8 @@ Authenticated crypto tax ledger for tracking chains like:
 
 The app uses Clerk for login/register, Neon Postgres for per-user ledger storage, and Next.js API routes for protected data access. It estimates holdings, follows FIFO cost basis from EUR into stablecoins and crypto, fetches live EUR values for common crypto assets, and exports CSV/JSON for tax preparation.
 
+The dashboard treats BTC and WBTC as BTC-equivalent for summary metrics. Its historical Coinbase funding helper records an `EUR → EURC → USDC` chain as two linked entries, preserving fiat-funded cost basis without double-counting the later crypto conversions as additional fiat spending.
+
 The authenticated wallet activity page can inspect Ethereum-compatible wallet addresses by date range and import selected supported activity into the portfolio ledger. It currently supports Ethereum, Polygon, Base, and Arbitrum One using Blockscout's public explorer API, then normalizes native transfers, ERC-20 transfers, fees, contract interactions, and reliably detectable swaps into one transaction view.
 
 Wallet imports use deterministic chain transaction IDs, so importing the same activity again does not create duplicates. Clear swaps become trades, incoming and outgoing transfers use an internal external-wallet balancing entry, and outgoing network fees become expense entries. Failed transactions, unsupported assets, and undecoded contract calls remain visible but cannot be imported.

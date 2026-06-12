@@ -24,6 +24,13 @@ describe("ledger parsing", () => {
       sellAmount: 80,
       sellAsset: "USDC",
     });
+
+    expect(parseTrade("I bought 100 eurc for 100 euro")).toEqual({
+      buyAmount: 100,
+      buyAsset: "EURC",
+      sellAmount: 100,
+      sellAsset: "EUR",
+    });
   });
 
   it("parses spent/paid wording and common aliases", () => {

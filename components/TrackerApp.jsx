@@ -43,6 +43,12 @@ import {
 import { readJsonResponse } from "@/lib/http";
 import { calculateLots, summarizeLotBasis } from "@/lib/cost-basis";
 import { buildTaxEvidence, taxEvidenceCsv, withIntegrityFingerprint } from "@/lib/tax-export";
+import {
+  btcEquivalentBuyCount,
+  btcEquivalentCostEur,
+  btcEquivalentHeld,
+  fiatSpentIntoCrypto,
+} from "@/lib/portfolio-metrics";
 
 export default function TrackerApp() {
   const [rows, setRows] = useState([]);
@@ -336,8 +342,10 @@ export default function TrackerApp() {
       setRows(sortRows(data.rows || []));
       setImportPreview(null);
       setImportError("");
+      return true;
     } catch (error) {
       setServerError(error.message || "Could not import rows");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -347,6 +355,35 @@ export default function TrackerApp() {
     await importRows("merge", legacyRows);
     window.localStorage.removeItem(STORAGE_KEY);
     setLegacyRows([]);
+  }
+
+  async function addFundingChain({ date: fundingDate, eurSpent, eurcReceived, usdcReceived, note: fundingNote }) {
+    const createdAt = new Date(`${fundingDate}T12:00:00.000Z`).toISOString();
+    const groupId = crypto.randomUUID();
+    return importRows("merge", [
+      {
+        id: `funding:${groupId}:eur-eurc`,
+        date: fundingDate,
+        createdAt,
+        buyAmount: eurcReceived,
+        buyAsset: "EURC",
+        sellAmount: eurSpent,
+        sellAsset: "EUR",
+        raw: `${eurSpent} EUR for ${eurcReceived} EURC`,
+        note: fundingNote || "Historical Coinbase funding: EUR to EURC",
+      },
+      {
+        id: `funding:${groupId}:eurc-usdc`,
+        date: fundingDate,
+        createdAt: new Date(new Date(createdAt).getTime() + 1000).toISOString(),
+        buyAmount: usdcReceived,
+        buyAsset: "USDC",
+        sellAmount: eurcReceived,
+        sellAsset: "EURC",
+        raw: `${eurcReceived} EURC for ${usdcReceived} USDC`,
+        note: fundingNote || "Historical Coinbase conversion: EURC to USDC",
+      },
+    ]);
   }
 
   return (
@@ -418,8 +455,10 @@ export default function TrackerApp() {
         <ManualTrade manual={manual} setManual={setManual} />
       </section>
 
+      <FundingChain onAdd={addFundingChain} isSaving={isSaving} />
+
       <section className="stats-grid">
-        <Stat icon={<Bitcoin />} label="BTC held" value={formatAmount(balances.BTC, "BTC")} />
+        <Stat icon={<Bitcoin />} label="BTC-equivalent held" value={formatAmount(btcEquivalentHeld(balances), "BTC")} />
         <Stat icon={<WalletCards />} label={`Portfolio est. (${baseCurrency})`} value={portfolio ? formatCurrency(portfolio.value, baseCurrency) : "Waiting for rates"} />
         <Stat icon={<ArrowDownUp />} label="EUR -> stable drag" value={formatBaseFromEur(fxLoss.dragEur, rates, baseCurrency)} tone={fxLoss.dragEur < 0 ? "bad" : "good"} />
         <Stat icon={<Landmark />} label="Tracked records" value={rows.length.toLocaleString()} />
@@ -580,6 +619,62 @@ function ManualTrade({ manual, setManual }) {
   );
 }
 
+function FundingChain({ onAdd, isSaving }) {
+  const [draft, setDraft] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    eurSpent: "",
+    eurcReceived: "",
+    usdcReceived: "",
+    note: "",
+  });
+
+  function update(key, value) {
+    setDraft((current) => {
+      const next = { ...current, [key]: value };
+      if (key === "eurSpent") {
+        if (!current.eurcReceived || current.eurcReceived === current.eurSpent) next.eurcReceived = value;
+        if (!current.usdcReceived || current.usdcReceived === current.eurSpent) next.usdcReceived = value;
+      }
+      if (key === "eurcReceived" && (!current.usdcReceived || current.usdcReceived === current.eurcReceived)) {
+        next.usdcReceived = value;
+      }
+      return next;
+    });
+  }
+
+  async function submit() {
+    const eurSpent = parseDraftAmount(draft.eurSpent);
+    const eurcReceived = parseDraftAmount(draft.eurcReceived);
+    const usdcReceived = parseDraftAmount(draft.usdcReceived);
+    if (![eurSpent, eurcReceived, usdcReceived].every((value) => Number.isFinite(value) && value > 0)) return;
+    const saved = await onAdd({ ...draft, eurSpent, eurcReceived, usdcReceived });
+    if (saved) setDraft((current) => ({ ...current, eurSpent: "", eurcReceived: "", usdcReceived: "", note: "" }));
+  }
+
+  const valid = [draft.eurSpent, draft.eurcReceived, draft.usdcReceived].every(
+    (value) => Number.isFinite(parseDraftAmount(value)) && parseDraftAmount(value) > 0,
+  );
+
+  return (
+    <section className="panel funding-panel">
+      <div className="panel-head">
+        <div>
+          <h2>Add historical Coinbase funding</h2>
+          <span>Records EUR → EURC → USDC as two linked ledger entries so fiat basis flows into later purchases.</span>
+        </div>
+      </div>
+      <div className="funding-grid">
+        <label>Date<input type="date" value={draft.date} onChange={(event) => update("date", event.target.value)} /></label>
+        <label>EUR spent<input inputMode="decimal" value={draft.eurSpent} onChange={(event) => update("eurSpent", event.target.value)} /></label>
+        <label>EURC received<input inputMode="decimal" value={draft.eurcReceived} onChange={(event) => update("eurcReceived", event.target.value)} /></label>
+        <label>USDC received<input inputMode="decimal" value={draft.usdcReceived} onChange={(event) => update("usdcReceived", event.target.value)} /></label>
+        <label>Note<input value={draft.note} onChange={(event) => update("note", event.target.value)} placeholder="Optional Coinbase reference" /></label>
+        <button className="primary" onClick={submit} disabled={!valid || isSaving}><Plus size={16} />Add funding chain</button>
+      </div>
+    </section>
+  );
+}
+
 function Stat({ icon, label, value, tone }) {
   return (
     <div className={`stat ${tone || ""}`}>
@@ -632,26 +727,24 @@ function Holdings({ balances, rates, lots, baseCurrency, isLoading }) {
 }
 
 function TaxSummary({ rows, lots, fxLoss, rates, baseCurrency }) {
-  const btcBuys = rows.filter((row) => row.buyAsset === "BTC");
-  const eurSpent = rows.filter((row) => row.sellAsset === "EUR").reduce((sum, row) => sum + row.sellAmount, 0);
-  const btcCost = (lots.pools.BTC || [])
-    .filter((lot) => lot.amount > 0)
-    .reduce((sum, lot) => sum + (lot.costEur || 0), 0);
+  const btcBuys = btcEquivalentBuyCount(rows);
+  const fiatSpent = fiatSpentIntoCrypto(rows);
+  const btcCost = btcEquivalentCostEur(lots.pools);
   const usdPerEur = getUsdPerEur(rates);
 
   return (
     <div className="tax-grid">
       <div>
-        <span>EUR spent into crypto</span>
-        <strong>{formatBaseFromEur(eurSpent, rates, baseCurrency)}</strong>
+        <span>Fiat spent into crypto</span>
+        <strong>{formatFiatTotals(fiatSpent)}</strong>
       </div>
       <div>
         <span>Open FIFO basis</span>
         <strong>{formatBaseFromEur(btcCost, rates, baseCurrency)}</strong>
       </div>
       <div>
-        <span>BTC buy count</span>
-        <strong>{btcBuys.length}</strong>
+        <span>BTC / WBTC buy count</span>
+        <strong>{btcBuys}</strong>
       </div>
       <div>
         <span>Stablecoin FX drag</span>
@@ -662,7 +755,8 @@ function TaxSummary({ rows, lots, fxLoss, rates, baseCurrency }) {
         <strong>{usdPerEur ? usdPerEur.toFixed(4) : "No rate"}</strong>
       </div>
       <p className="tax-note">
-        The app estimates FIFO basis from your recorded chain of trades. FX drag compares your EUR-to-stablecoin buys
+        The app estimates FIFO basis from your recorded chain of trades. Fiat spent counts only recorded fiat-to-crypto
+        purchases, while FX drag compares your EUR-to-USD-stablecoin buys
         against the current EUR/USD rate when live rates are available. Keep exchange statements too; tax rules differ by
         country and this is a filing helper, not tax advice.
       </p>
@@ -856,6 +950,12 @@ function formatCostBasis({ asset, amount, cost, basis, rates, baseCurrency }) {
   );
   if (!known.length) return "Unknown";
   return known.map(([basisAsset, basisAmount]) => formatAmount(basisAmount, basisAsset)).join(" + ");
+}
+
+function formatFiatTotals(totals) {
+  const entries = Object.entries(totals);
+  if (!entries.length) return "None recorded";
+  return entries.map(([currency, amount]) => formatCurrency(amount, currency)).join(" + ");
 }
 
 function valueAsset(asset, amount, rates, baseCurrency = "EUR") {
