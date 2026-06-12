@@ -99,6 +99,20 @@ describe("import/export", () => {
     expect(result.invalidRows).toHaveLength(1);
   });
 
+  it("accepts internal balancing assets used by wallet imports", () => {
+    const result = normalizeImportedRows([
+      {
+        ...row,
+        id: "wallet-row",
+        buyAsset: "USDC",
+        sellAsset: "EXTERNAL_WALLET",
+      },
+    ]);
+
+    expect(result.invalidRows).toHaveLength(0);
+    expect(result.validRows[0].sellAsset).toBe("EXTERNAL_WALLET");
+  });
+
   it("builds an import preview with existing duplicate detection", () => {
     const preview = buildImportPreview(JSON.stringify({ rows: [row] }), "backup.json", [row]);
     expect(preview.validRows).toHaveLength(1);

@@ -789,8 +789,24 @@ td {
   color: var(--accent-dark);
 }
 
+.wallet-results-head,
+.wallet-import-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.wallet-import-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wallet-import-actions .primary {
+  min-height: 38px;
+}
+
 .wallet-table {
-  min-width: 1120px;
+  min-width: 1240px;
 }
 
 .wallet-table td {
@@ -859,6 +875,31 @@ td {
   color: var(--muted);
 }
 
+.wallet-import-choice,
+.imported-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.wallet-import-choice {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.wallet-import-choice input {
+  min-height: auto;
+  width: auto;
+}
+
+.imported-label {
+  color: var(--green);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .failed-text {
   color: var(--red);
   display: block;
@@ -878,6 +919,15 @@ code {
   .public-hero,
   .wallet-search-grid {
     grid-template-columns: 1fr;
+  }
+
+  .wallet-results-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .wallet-import-actions {
+    justify-content: flex-start;
   }
 
   .topbar {

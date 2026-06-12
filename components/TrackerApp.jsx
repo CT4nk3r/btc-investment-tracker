@@ -24,6 +24,7 @@ import {
   BACKUP_SCHEMA_VERSION,
   COINGECKO_IDS,
   FIAT,
+  INTERNAL_ASSETS,
   RATE_CACHE_KEY,
   STABLES,
   STORAGE_KEY,
@@ -543,7 +544,7 @@ function Stat({ icon, label, value, tone }) {
 
 function Holdings({ balances, rates, lots, isLoading }) {
   const visible = Object.entries(balances)
-    .filter(([, amount]) => Math.abs(amount) > 0.00000001)
+    .filter(([asset, amount]) => !INTERNAL_ASSETS.includes(asset) && Math.abs(amount) > 0.00000001)
     .sort(([a], [b]) => (a === "BTC" ? -1 : b === "BTC" ? 1 : a.localeCompare(b)));
 
   if (isLoading) return <p className="empty">Loading holdings...</p>;
@@ -838,7 +839,9 @@ function takeCost(pools, asset, amount) {
 function valuePortfolio(balances, rates) {
   if (!rates) return null;
   return {
-    eur: Object.entries(balances).reduce((sum, [asset, amount]) => sum + (valueAsset(asset, amount, rates) || 0), 0),
+    eur: Object.entries(balances)
+      .filter(([asset]) => !INTERNAL_ASSETS.includes(asset))
+      .reduce((sum, [asset, amount]) => sum + (valueAsset(asset, amount, rates) || 0), 0),
   };
 }
 

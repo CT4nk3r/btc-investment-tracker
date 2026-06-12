@@ -7,7 +7,7 @@
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
-    "test": "vitest run tests/*.test.js",
+    "test": "vitest run tests --exclude tests/e2e/**",
     "test:e2e": "playwright test",
     "verify": "npm run test && npm run build && npm audit --omit=dev",
     "db:schema": "node scripts/apply-schema.mjs"

@@ -3,6 +3,7 @@ import {
   formatUnits,
   isEvmAddress,
   normalizeWalletTransactions,
+  walletTransactionToLedgerRows,
   WALLET_CHAINS,
 } from "../lib/wallet-transactions.js";
 
@@ -134,5 +135,89 @@ describe("wallet transaction normalization", () => {
       summary: "Undecoded contract interaction",
       status: "failed",
     });
+  });
+
+  it("converts swaps and fees into deterministic ledger rows", () => {
+    const rows = walletTransactionToLedgerRows(
+      {
+        hash: "0xSWAP",
+        timestamp: "2026-06-05T12:00:00.000Z",
+        status: "success",
+        summary: "Swapped 100 USDC for 0.0016 WBTC",
+        sentAssets: [{ amount: "100", symbol: "USDC" }],
+        receivedAssets: [{ amount: "0.0016", symbol: "WBTC" }],
+        fee: { amount: "0.1", symbol: "POL" },
+      },
+      "polygon",
+    );
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: "wallet:polygon:0xswap:trade",
+        buyAmount: 0.0016,
+        buyAsset: "WBTC",
+        sellAmount: 100,
+        sellAsset: "USDC",
+      }),
+      expect.objectContaining({
+        id: "wallet:polygon:0xswap:fee",
+        buyAmount: 0.1,
+        buyAsset: "NETWORK_FEE",
+        sellAmount: 0.1,
+        sellAsset: "POL",
+      }),
+    ]);
+  });
+
+  it("converts one-sided transfers through an external wallet balance", () => {
+    const rows = walletTransactionToLedgerRows(
+      {
+        hash: "0xreceive",
+        timestamp: "2026-06-05T12:00:00.000Z",
+        status: "success",
+        summary: "Received 229.217839 USDC",
+        sentAssets: [],
+        receivedAssets: [{ amount: "229.217839", symbol: "USDC" }],
+        fee: null,
+      },
+      "polygon",
+    );
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: "wallet:polygon:0xreceive:received-0",
+        buyAmount: 229.217839,
+        buyAsset: "USDC",
+        sellAmount: 229.217839,
+        sellAsset: "EXTERNAL_WALLET",
+      }),
+    ]);
+  });
+
+  it("does not import failed or unsupported wallet activity", () => {
+    expect(
+      walletTransactionToLedgerRows(
+        {
+          hash: "0xfailed",
+          timestamp: "2026-06-05T12:00:00.000Z",
+          status: "failed",
+          sentAssets: [{ amount: "1", symbol: "USDC" }],
+          receivedAssets: [],
+        },
+        "polygon",
+      ),
+    ).toEqual([]);
+    expect(
+      walletTransactionToLedgerRows(
+        {
+          hash: "0xnft",
+          timestamp: "2026-06-05T12:00:00.000Z",
+          status: "success",
+          sentAssets: [],
+          receivedAssets: [{ amount: "1", symbol: "NFT" }],
+        },
+        "polygon",
+      ),
+    ).toEqual([]);
   });
 });

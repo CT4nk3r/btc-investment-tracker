@@ -1,17 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  CheckCircle2,
+  Download,
   ExternalLink,
   Search,
   WalletCards,
 } from "lucide-react";
 import { readJsonResponse } from "@/lib/http";
-import { isEvmAddress, WALLET_CHAINS } from "@/lib/wallet-transactions";
+import {
+  isEvmAddress,
+  walletTransactionToLedgerRows,
+  WALLET_CHAINS,
+} from "@/lib/wallet-transactions";
 
 const today = new Date().toISOString().slice(0, 10);
 const monthAgo = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
@@ -26,6 +32,24 @@ export default function WalletTransactions() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [selectedHashes, setSelectedHashes] = useState([]);
+  const [importedHashes, setImportedHashes] = useState([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState("");
+  const importableByHash = useMemo(
+    () =>
+      new Map(
+        transactions.map((transaction) => [
+          transaction.hash,
+          walletTransactionToLedgerRows(transaction, chain),
+        ]),
+      ),
+    [chain, transactions],
+  );
+  const selectedRows = useMemo(
+    () => selectedHashes.flatMap((hash) => importableByHash.get(hash) || []),
+    [importableByHash, selectedHashes],
+  );
 
   async function searchTransactions(event) {
     event.preventDefault();
@@ -45,12 +69,58 @@ export default function WalletTransactions() {
       if (!response.ok) throw new Error(data.error || "Could not load wallet activity");
       setTransactions(data.transactions || []);
       setMeta(data.meta || null);
+      setSelectedHashes([]);
+      setImportedHashes([]);
+      setImportMessage("");
     } catch (searchError) {
       setTransactions([]);
       setMeta(null);
       setError(searchError.message || "Could not load wallet activity");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  function toggleTransaction(hash) {
+    setSelectedHashes((current) =>
+      current.includes(hash) ? current.filter((item) => item !== hash) : [...current, hash],
+    );
+  }
+
+  function selectEligibleTransactions() {
+    setSelectedHashes(
+      transactions
+        .filter(
+          (transaction) =>
+            (importableByHash.get(transaction.hash) || []).length > 0 &&
+            !importedHashes.includes(transaction.hash),
+        )
+        .map((transaction) => transaction.hash),
+    );
+  }
+
+  async function importSelectedTransactions() {
+    if (!selectedRows.length) return;
+    setIsImporting(true);
+    setError("");
+    setImportMessage("");
+    try {
+      const response = await fetch("/api/ledger/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "merge", rows: selectedRows }),
+      });
+      const data = (await readJsonResponse(response)) || {};
+      if (!response.ok) throw new Error(data.error || "Could not import wallet transactions");
+      setImportedHashes((current) => [...new Set([...current, ...selectedHashes])]);
+      setImportMessage(
+        `${selectedRows.length.toLocaleString()} ledger ${selectedRows.length === 1 ? "row was" : "rows were"} processed.`,
+      );
+      setSelectedHashes([]);
+    } catch (importError) {
+      setError(importError.message || "Could not import wallet transactions");
+    } finally {
+      setIsImporting(false);
     }
   }
 
@@ -115,6 +185,16 @@ export default function WalletTransactions() {
         </div>
       ) : null}
 
+      {importMessage ? (
+        <div className="migration-box">
+          <div>
+            <strong>Wallet activity added to your portfolio</strong>
+            <span>{importMessage} Re-importing the same chain transactions will not create duplicates.</span>
+          </div>
+          <CheckCircle2 size={20} />
+        </div>
+      ) : null}
+
       {meta?.truncated ? (
         <div className="migration-box">
           <div>
@@ -125,7 +205,7 @@ export default function WalletTransactions() {
       ) : null}
 
       <section className="panel wallet-results">
-        <div className="panel-head">
+        <div className="panel-head wallet-results-head">
           <div>
             <h2>Transactions</h2>
             <span>
@@ -134,7 +214,16 @@ export default function WalletTransactions() {
                 : "Explorer-style wallet history"}
             </span>
           </div>
-          <WalletCards size={22} />
+          <div className="wallet-import-actions">
+            <button onClick={selectEligibleTransactions} disabled={isLoading || !transactions.length || isImporting}>
+              Select eligible
+            </button>
+            <button className="primary" onClick={importSelectedTransactions} disabled={!selectedRows.length || isImporting}>
+              <Download size={16} />
+              {isImporting ? "Importing" : `Import selected (${selectedHashes.length})`}
+            </button>
+            <WalletCards size={22} />
+          </div>
         </div>
 
         {isLoading ? <p className="empty">Loading on-chain activity...</p> : null}
@@ -144,18 +233,33 @@ export default function WalletTransactions() {
         {!isLoading && !hasSearched ? (
           <p className="empty">Enter a wallet address to inspect its on-chain activity.</p>
         ) : null}
-        {!isLoading && transactions.length ? <TransactionTable transactions={transactions} /> : null}
+        {!isLoading && transactions.length ? (
+          <TransactionTable
+            transactions={transactions}
+            importableByHash={importableByHash}
+            importedHashes={importedHashes}
+            selectedHashes={selectedHashes}
+            toggleTransaction={toggleTransaction}
+          />
+        ) : null}
       </section>
     </main>
   );
 }
 
-function TransactionTable({ transactions }) {
+function TransactionTable({
+  transactions,
+  importableByHash,
+  importedHashes,
+  selectedHashes,
+  toggleTransaction,
+}) {
   return (
     <div className="table-wrap">
       <table className="wallet-table">
         <thead>
           <tr>
+            <th>Import</th>
             <th>Time</th>
             <th>Activity</th>
             <th>Sent</th>
@@ -168,6 +272,15 @@ function TransactionTable({ transactions }) {
         <tbody>
           {transactions.map((transaction) => (
             <tr key={transaction.hash}>
+              <td>
+                <ImportChoice
+                  transaction={transaction}
+                  rowCount={(importableByHash.get(transaction.hash) || []).length}
+                  imported={importedHashes.includes(transaction.hash)}
+                  selected={selectedHashes.includes(transaction.hash)}
+                  onChange={() => toggleTransaction(transaction.hash)}
+                />
+              </td>
               <td>{new Date(transaction.timestamp).toLocaleString()}</td>
               <td>
                 <span className={`tx-type ${transaction.type}`}>{formatType(transaction.type)}</span>
@@ -189,6 +302,20 @@ function TransactionTable({ transactions }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+function ImportChoice({ transaction, rowCount, imported, selected, onChange }) {
+  if (imported) return <span className="imported-label"><CheckCircle2 size={14} /> Imported</span>;
+  if (!rowCount) {
+    const reason = transaction.status === "failed" ? "Failed" : "Unsupported";
+    return <span className="muted-text" title="No supported asset movement can be added to the ledger.">{reason}</span>;
+  }
+  return (
+    <label className="wallet-import-choice">
+      <input type="checkbox" checked={selected} onChange={onChange} />
+      <span>{rowCount} {rowCount === 1 ? "row" : "rows"}</span>
+    </label>
   );
 }
 
