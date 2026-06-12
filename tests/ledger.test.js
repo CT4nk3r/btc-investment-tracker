@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildImportPreview,
   cleanExportRow,
+  formatCurrency,
   normalizeImportedRows,
   parseCsv,
   parseJsonRows,
@@ -22,6 +23,13 @@ describe("ledger parsing", () => {
       buyAsset: "BTC",
       sellAmount: 80,
       sellAsset: "USDC",
+    });
+
+    expect(parseTrade("I bought 100 eurc for 100 euro")).toEqual({
+      buyAmount: 100,
+      buyAsset: "EURC",
+      sellAmount: 100,
+      sellAsset: "EUR",
     });
   });
 
@@ -99,6 +107,39 @@ describe("import/export", () => {
     expect(result.invalidRows).toHaveLength(1);
   });
 
+  it("accepts internal balancing assets used by wallet imports", () => {
+    const result = normalizeImportedRows([
+      {
+        ...row,
+        id: "wallet-row",
+        buyAsset: "USDC",
+        sellAsset: "EXTERNAL_WALLET",
+      },
+    ]);
+
+    expect(result.invalidRows).toHaveLength(0);
+    expect(result.validRows[0].sellAsset).toBe("EXTERNAL_WALLET");
+  });
+
+  it("preserves structured wallet source metadata", () => {
+    const result = normalizeImportedRows([
+      {
+        ...row,
+        source_metadata: JSON.stringify({
+          sourceType: "wallet_import",
+          chainId: "polygon",
+          transactionHash: "0xabc",
+        }),
+      },
+    ]);
+
+    expect(result.validRows[0].sourceMetadata).toEqual({
+      sourceType: "wallet_import",
+      chainId: "polygon",
+      transactionHash: "0xabc",
+    });
+  });
+
   it("builds an import preview with existing duplicate detection", () => {
     const preview = buildImportPreview(JSON.stringify({ rows: [row] }), "backup.json", [row]);
     expect(preview.validRows).toHaveLength(1);
@@ -106,6 +147,14 @@ describe("import/export", () => {
   });
 
   it("exports only portable row fields", () => {
-    expect(cleanExportRow({ ...row, userId: "secret", updatedAt: "ignored" })).toEqual(row);
+    expect(cleanExportRow({ ...row, userId: "secret", updatedAt: "ignored" })).toEqual({
+      ...row,
+      sourceMetadata: {},
+    });
+  });
+
+  it("formats supported base currencies", () => {
+    expect(formatCurrency(584.48, "EUR")).toContain("584.48");
+    expect(formatCurrency(677, "USD")).toContain("677");
   });
 });

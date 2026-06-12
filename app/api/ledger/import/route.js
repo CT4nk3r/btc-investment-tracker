@@ -22,8 +22,8 @@ export async function POST(request) {
     const body = await request.json();
     const mode = body.mode === "replace" ? "replace" : "merge";
     const rows = Array.isArray(body.rows) ? body.rows : [];
-    const importedRows = await importLedgerRows(userId, rows, mode);
-    return NextResponse.json({ rows: importedRows });
+    const result = await importLedgerRows(userId, rows, mode);
+    return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
       { error: error.message || "Could not import ledger rows" },

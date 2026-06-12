@@ -8,6 +8,7 @@ import {
   CalendarDays,
   CheckCircle2,
   FileJson,
+  FileCheck2,
   FileSpreadsheet,
   Landmark,
   Pencil,
@@ -22,8 +23,10 @@ import {
 import {
   ASSETS,
   BACKUP_SCHEMA_VERSION,
+  BASE_CURRENCY_KEY,
   COINGECKO_IDS,
   FIAT,
+  INTERNAL_ASSETS,
   RATE_CACHE_KEY,
   STABLES,
   STORAGE_KEY,
@@ -31,13 +34,21 @@ import {
   cleanExportRow,
   csvCell,
   formatAmount,
-  formatEuro,
+  formatCurrency,
   normalizeImportedRows,
   parseTrade,
   sortRows,
   withoutSampleRows,
 } from "@/lib/ledger";
 import { readJsonResponse } from "@/lib/http";
+import { calculateLots, summarizeLotBasis } from "@/lib/cost-basis";
+import { buildTaxEvidence, taxEvidenceCsv, withIntegrityFingerprint } from "@/lib/tax-export";
+import {
+  btcEquivalentBuyCount,
+  btcEquivalentCostEur,
+  btcEquivalentHeld,
+  fiatSpentIntoCrypto,
+} from "@/lib/portfolio-metrics";
 
 export default function TrackerApp() {
   const [rows, setRows] = useState([]);
@@ -62,11 +73,15 @@ export default function TrackerApp() {
     }
   });
   const [rateState, setRateState] = useState("idle");
+  const [baseCurrency, setBaseCurrency] = useState(() => {
+    if (typeof window === "undefined") return "EUR";
+    return window.localStorage.getItem(BASE_CURRENCY_KEY) === "USD" ? "USD" : "EUR";
+  });
 
   const parsed = useMemo(() => parseTrade(phrase), [phrase]);
   const balances = useMemo(() => holdingsFromRows(rows), [rows]);
   const lots = useMemo(() => calculateLots(rows), [rows]);
-  const portfolio = useMemo(() => valuePortfolio(balances, rates), [balances, rates]);
+  const portfolio = useMemo(() => valuePortfolio(balances, rates, baseCurrency), [balances, rates, baseCurrency]);
   const fxLoss = useMemo(() => calculateFxDrag(rows, rates), [rows, rates]);
 
   useEffect(() => {
@@ -112,6 +127,12 @@ export default function TrackerApp() {
     } catch {
       setRateState("failed");
     }
+  }
+
+  function changeBaseCurrency(value) {
+    const next = value === "USD" ? "USD" : "EUR";
+    window.localStorage.setItem(BASE_CURRENCY_KEY, next);
+    setBaseCurrency(next);
   }
 
   async function addTrade() {
@@ -175,6 +196,7 @@ export default function TrackerApp() {
       note: row.note || "",
       raw: row.raw || "",
       createdAt: row.createdAt,
+      sourceMetadata: row.sourceMetadata || {},
     });
   }
 
@@ -247,6 +269,7 @@ export default function TrackerApp() {
       "note",
       "raw",
       "created_at",
+      "source_metadata",
     ];
     const body = rows.map((row) =>
       [
@@ -260,11 +283,30 @@ export default function TrackerApp() {
         row.note,
         row.raw,
         row.createdAt,
+        JSON.stringify(row.sourceMetadata || {}),
       ]
         .map(csvCell)
         .join(","),
     );
     download(`btc-investment-tracker-${new Date().toISOString().slice(0, 10)}.csv`, [header.join(","), ...body].join("\n"), "text/csv;charset=utf-8");
+  }
+
+  function exportTaxCsv() {
+    const evidence = buildTaxEvidence({ rows, rates, baseCurrency });
+    download(
+      `btc-investment-tracker-tax-records-${new Date().toISOString().slice(0, 10)}.csv`,
+      taxEvidenceCsv(evidence),
+      "text/csv;charset=utf-8",
+    );
+  }
+
+  async function exportTaxEvidence() {
+    const evidence = await withIntegrityFingerprint(buildTaxEvidence({ rows, rates, baseCurrency }));
+    download(
+      `btc-investment-tracker-tax-evidence-${new Date().toISOString().slice(0, 10)}.json`,
+      JSON.stringify(evidence, null, 2),
+      "application/json",
+    );
   }
 
   function importFile(event) {
@@ -300,8 +342,10 @@ export default function TrackerApp() {
       setRows(sortRows(data.rows || []));
       setImportPreview(null);
       setImportError("");
+      return true;
     } catch (error) {
       setServerError(error.message || "Could not import rows");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -311,6 +355,35 @@ export default function TrackerApp() {
     await importRows("merge", legacyRows);
     window.localStorage.removeItem(STORAGE_KEY);
     setLegacyRows([]);
+  }
+
+  async function addFundingChain({ date: fundingDate, eurSpent, eurcReceived, usdcReceived, note: fundingNote }) {
+    const createdAt = new Date(`${fundingDate}T12:00:00.000Z`).toISOString();
+    const groupId = crypto.randomUUID();
+    return importRows("merge", [
+      {
+        id: `funding:${groupId}:eur-eurc`,
+        date: fundingDate,
+        createdAt,
+        buyAmount: eurcReceived,
+        buyAsset: "EURC",
+        sellAmount: eurSpent,
+        sellAsset: "EUR",
+        raw: `${eurSpent} EUR for ${eurcReceived} EURC`,
+        note: fundingNote || "Historical Coinbase funding: EUR to EURC",
+      },
+      {
+        id: `funding:${groupId}:eurc-usdc`,
+        date: fundingDate,
+        createdAt: new Date(new Date(createdAt).getTime() + 1000).toISOString(),
+        buyAmount: usdcReceived,
+        buyAsset: "USDC",
+        sellAmount: eurcReceived,
+        sellAsset: "EURC",
+        raw: `${eurcReceived} EURC for ${usdcReceived} USDC`,
+        note: fundingNote || "Historical Coinbase conversion: EURC to USDC",
+      },
+    ]);
   }
 
   return (
@@ -323,6 +396,13 @@ export default function TrackerApp() {
         <div className="rate-pill">
           <RefreshCcw size={16} />
           <span>{rates ? `Rates ${new Date(rates.updatedAt).toLocaleString()}` : "No live rates yet"}</span>
+          <label className="base-currency">
+            Display
+            <select value={baseCurrency} onChange={(event) => changeBaseCurrency(event.target.value)}>
+              <option value="EUR">EUR</option>
+              <option value="USD">USD</option>
+            </select>
+          </label>
           <button onClick={refreshRates} aria-label="Refresh exchange rates">
             Refresh
           </button>
@@ -375,10 +455,12 @@ export default function TrackerApp() {
         <ManualTrade manual={manual} setManual={setManual} />
       </section>
 
+      <FundingChain onAdd={addFundingChain} isSaving={isSaving} />
+
       <section className="stats-grid">
-        <Stat icon={<Bitcoin />} label="BTC held" value={formatAmount(balances.BTC, "BTC")} />
-        <Stat icon={<WalletCards />} label="Portfolio est." value={portfolio ? formatEuro(portfolio.eur) : "Waiting for rates"} />
-        <Stat icon={<ArrowDownUp />} label="EUR -> stable drag" value={formatEuro(fxLoss.dragEur)} tone={fxLoss.dragEur < 0 ? "bad" : "good"} />
+        <Stat icon={<Bitcoin />} label="BTC-equivalent held" value={formatAmount(btcEquivalentHeld(balances), "BTC")} />
+        <Stat icon={<WalletCards />} label={`Portfolio est. (${baseCurrency})`} value={portfolio ? formatCurrency(portfolio.value, baseCurrency) : "Waiting for rates"} />
+        <Stat icon={<ArrowDownUp />} label="EUR -> stable drag" value={formatBaseFromEur(fxLoss.dragEur, rates, baseCurrency)} tone={fxLoss.dragEur < 0 ? "bad" : "good"} />
         <Stat icon={<Landmark />} label="Tracked records" value={rows.length.toLocaleString()} />
       </section>
 
@@ -388,7 +470,7 @@ export default function TrackerApp() {
             <h2>Holdings</h2>
             <span>{rateState === "failed" ? "Live rates unavailable" : "Live value where supported"}</span>
           </div>
-          <Holdings balances={balances} rates={rates} lots={lots.pools} isLoading={isLoadingRows} />
+          <Holdings balances={balances} rates={rates} lots={lots.pools} baseCurrency={baseCurrency} isLoading={isLoadingRows} />
         </div>
 
         <div className="panel">
@@ -396,7 +478,7 @@ export default function TrackerApp() {
             <h2>Tax Helpers</h2>
             <span>FIFO cost tracking</span>
           </div>
-          <TaxSummary rows={rows} lots={lots} fxLoss={fxLoss} rates={rates} />
+          <TaxSummary rows={rows} lots={lots} fxLoss={fxLoss} rates={rates} baseCurrency={baseCurrency} />
         </div>
       </section>
 
@@ -404,7 +486,7 @@ export default function TrackerApp() {
         <div className="panel-head ledger-actions">
           <div>
             <h2>Ledger</h2>
-            <span>Export this before tax filing or browser cleanup</span>
+            <span>Tax exports include source links, UTC timestamps, methodology, rates, and integrity metadata</span>
           </div>
           <div className="actions">
             <button onClick={exportCsv}>
@@ -414,6 +496,14 @@ export default function TrackerApp() {
             <button onClick={exportJson}>
               <FileJson size={16} />
               JSON
+            </button>
+            <button onClick={exportTaxCsv}>
+              <FileCheck2 size={16} />
+              Tax CSV
+            </button>
+            <button onClick={exportTaxEvidence}>
+              <FileCheck2 size={16} />
+              Evidence JSON
             </button>
             <label className="upload">
               <Upload size={16} />
@@ -529,6 +619,62 @@ function ManualTrade({ manual, setManual }) {
   );
 }
 
+function FundingChain({ onAdd, isSaving }) {
+  const [draft, setDraft] = useState({
+    date: new Date().toISOString().slice(0, 10),
+    eurSpent: "",
+    eurcReceived: "",
+    usdcReceived: "",
+    note: "",
+  });
+
+  function update(key, value) {
+    setDraft((current) => {
+      const next = { ...current, [key]: value };
+      if (key === "eurSpent") {
+        if (!current.eurcReceived || current.eurcReceived === current.eurSpent) next.eurcReceived = value;
+        if (!current.usdcReceived || current.usdcReceived === current.eurSpent) next.usdcReceived = value;
+      }
+      if (key === "eurcReceived" && (!current.usdcReceived || current.usdcReceived === current.eurcReceived)) {
+        next.usdcReceived = value;
+      }
+      return next;
+    });
+  }
+
+  async function submit() {
+    const eurSpent = parseDraftAmount(draft.eurSpent);
+    const eurcReceived = parseDraftAmount(draft.eurcReceived);
+    const usdcReceived = parseDraftAmount(draft.usdcReceived);
+    if (![eurSpent, eurcReceived, usdcReceived].every((value) => Number.isFinite(value) && value > 0)) return;
+    const saved = await onAdd({ ...draft, eurSpent, eurcReceived, usdcReceived });
+    if (saved) setDraft((current) => ({ ...current, eurSpent: "", eurcReceived: "", usdcReceived: "", note: "" }));
+  }
+
+  const valid = [draft.eurSpent, draft.eurcReceived, draft.usdcReceived].every(
+    (value) => Number.isFinite(parseDraftAmount(value)) && parseDraftAmount(value) > 0,
+  );
+
+  return (
+    <section className="panel funding-panel">
+      <div className="panel-head">
+        <div>
+          <h2>Add historical Coinbase funding</h2>
+          <span>Records EUR → EURC → USDC as two linked ledger entries so fiat basis flows into later purchases.</span>
+        </div>
+      </div>
+      <div className="funding-grid">
+        <label>Date<input type="date" value={draft.date} onChange={(event) => update("date", event.target.value)} /></label>
+        <label>EUR spent<input inputMode="decimal" value={draft.eurSpent} onChange={(event) => update("eurSpent", event.target.value)} /></label>
+        <label>EURC received<input inputMode="decimal" value={draft.eurcReceived} onChange={(event) => update("eurcReceived", event.target.value)} /></label>
+        <label>USDC received<input inputMode="decimal" value={draft.usdcReceived} onChange={(event) => update("usdcReceived", event.target.value)} /></label>
+        <label>Note<input value={draft.note} onChange={(event) => update("note", event.target.value)} placeholder="Optional Coinbase reference" /></label>
+        <button className="primary" onClick={submit} disabled={!valid || isSaving}><Plus size={16} />Add funding chain</button>
+      </div>
+    </section>
+  );
+}
+
 function Stat({ icon, label, value, tone }) {
   return (
     <div className={`stat ${tone || ""}`}>
@@ -541,9 +687,9 @@ function Stat({ icon, label, value, tone }) {
   );
 }
 
-function Holdings({ balances, rates, lots, isLoading }) {
+function Holdings({ balances, rates, lots, baseCurrency, isLoading }) {
   const visible = Object.entries(balances)
-    .filter(([, amount]) => Math.abs(amount) > 0.00000001)
+    .filter(([asset, amount]) => !INTERNAL_ASSETS.includes(asset) && Math.abs(amount) > 0.00000001)
     .sort(([a], [b]) => (a === "BTC" ? -1 : b === "BTC" ? 1 : a.localeCompare(b)));
 
   if (isLoading) return <p className="empty">Loading holdings...</p>;
@@ -563,13 +709,14 @@ function Holdings({ balances, rates, lots, isLoading }) {
         <tbody>
           {visible.map(([asset, amount]) => {
             const cost = (lots[asset] || []).reduce((sum, lot) => sum + (lot.costEur || 0), 0);
-            const live = valueAsset(asset, amount, rates);
+            const basis = summarizeLotBasis(lots[asset]);
+            const live = valueAsset(asset, amount, rates, baseCurrency);
             return (
               <tr key={asset}>
                 <td>{asset}</td>
                 <td>{formatAmount(amount)}</td>
-                <td>{cost ? formatEuro(cost) : asset === "EUR" ? formatEuro(amount) : "Unknown"}</td>
-                <td>{live ? formatEuro(live) : "No rate"}</td>
+                <td>{formatCostBasis({ asset, amount, cost, basis, rates, baseCurrency })}</td>
+                <td>{live ? formatCurrency(live, baseCurrency) : "No rate"}</td>
               </tr>
             );
           })}
@@ -579,38 +726,37 @@ function Holdings({ balances, rates, lots, isLoading }) {
   );
 }
 
-function TaxSummary({ rows, lots, fxLoss, rates }) {
-  const btcBuys = rows.filter((row) => row.buyAsset === "BTC");
-  const eurSpent = rows.filter((row) => row.sellAsset === "EUR").reduce((sum, row) => sum + row.sellAmount, 0);
-  const btcCost = (lots.pools.BTC || [])
-    .filter((lot) => lot.amount > 0)
-    .reduce((sum, lot) => sum + (lot.costEur || 0), 0);
+function TaxSummary({ rows, lots, fxLoss, rates, baseCurrency }) {
+  const btcBuys = btcEquivalentBuyCount(rows);
+  const fiatSpent = fiatSpentIntoCrypto(rows);
+  const btcCost = btcEquivalentCostEur(lots.pools);
   const usdPerEur = getUsdPerEur(rates);
 
   return (
     <div className="tax-grid">
       <div>
-        <span>EUR spent into crypto</span>
-        <strong>{formatEuro(eurSpent)}</strong>
+        <span>Fiat spent into crypto</span>
+        <strong>{formatFiatTotals(fiatSpent)}</strong>
       </div>
       <div>
         <span>Open FIFO basis</span>
-        <strong>{formatEuro(btcCost)}</strong>
+        <strong>{formatBaseFromEur(btcCost, rates, baseCurrency)}</strong>
       </div>
       <div>
-        <span>BTC buy count</span>
-        <strong>{btcBuys.length}</strong>
+        <span>BTC / WBTC buy count</span>
+        <strong>{btcBuys}</strong>
       </div>
       <div>
         <span>Stablecoin FX drag</span>
-        <strong className={fxLoss.dragEur < 0 ? "bad-text" : "good-text"}>{formatEuro(fxLoss.dragEur)}</strong>
+        <strong className={fxLoss.dragEur < 0 ? "bad-text" : "good-text"}>{formatBaseFromEur(fxLoss.dragEur, rates, baseCurrency)}</strong>
       </div>
       <div>
         <span>Current USD per EUR</span>
         <strong>{usdPerEur ? usdPerEur.toFixed(4) : "No rate"}</strong>
       </div>
       <p className="tax-note">
-        The app estimates FIFO basis from your recorded chain of trades. FX drag compares your EUR-to-stablecoin buys
+        The app estimates FIFO basis from your recorded chain of trades. Fiat spent counts only recorded fiat-to-crypto
+        purchases, while FX drag compares your EUR-to-USD-stablecoin buys
         against the current EUR/USD rate when live rates are available. Keep exchange statements too; tax rules differ by
         country and this is a filing helper, not tax advice.
       </p>
@@ -786,71 +932,53 @@ function holdingsFromRows(rows) {
   return balances;
 }
 
-function calculateLots(rows) {
-  const pools = {};
-  const realized = [];
-
-  for (const row of [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))) {
-    const fromCost = takeCost(pools, row.sellAsset, row.sellAmount);
-    const inferredEurCost =
-      fromCost.costEur > 0 ? fromCost.costEur : row.sellAsset === "EUR" ? row.sellAmount : undefined;
-
-    if (!pools[row.buyAsset]) pools[row.buyAsset] = [];
-    pools[row.buyAsset].push({
-      amount: row.buyAmount,
-      costEur: inferredEurCost,
-      sourceId: row.id,
-      date: row.date,
-    });
-
-    if (fromCost.costEur > 0 && row.sellAsset !== "EUR") {
-      realized.push({
-        row,
-        asset: row.sellAsset,
-        disposedAmount: row.sellAmount,
-        costEur: fromCost.costEur,
-        proceedsEur: inferredEurCost,
-      });
-    }
-  }
-
-  return { pools, realized };
-}
-
-function takeCost(pools, asset, amount) {
-  if (asset === "EUR") return { costEur: amount };
-  if (!pools[asset]) return { costEur: 0 };
-  let remaining = amount;
-  let costEur = 0;
-  for (const lot of pools[asset]) {
-    if (remaining <= 0) break;
-    const used = Math.min(lot.amount, remaining);
-    const ratio = lot.amount ? used / lot.amount : 0;
-    costEur += (lot.costEur || 0) * ratio;
-    lot.amount -= used;
-    lot.costEur = (lot.costEur || 0) * (1 - ratio);
-    remaining -= used;
-  }
-  pools[asset] = pools[asset].filter((lot) => lot.amount > 0.000000000001);
-  return { costEur };
-}
-
-function valuePortfolio(balances, rates) {
+function valuePortfolio(balances, rates, baseCurrency) {
   if (!rates) return null;
   return {
-    eur: Object.entries(balances).reduce((sum, [asset, amount]) => sum + (valueAsset(asset, amount, rates) || 0), 0),
+    value: Object.entries(balances)
+      .filter(([asset]) => !INTERNAL_ASSETS.includes(asset))
+      .reduce((sum, [asset, amount]) => sum + (valueAsset(asset, amount, rates, baseCurrency) || 0), 0),
   };
 }
 
-function valueAsset(asset, amount, rates) {
+function formatCostBasis({ asset, amount, cost, basis, rates, baseCurrency }) {
+  if (cost) return formatBaseFromEur(cost, rates, baseCurrency);
+  if (asset === "EUR") return formatBaseFromEur(amount, rates, baseCurrency);
+
+  const known = Object.entries(basis).filter(
+    ([basisAsset, basisAmount]) => !INTERNAL_ASSETS.includes(basisAsset) && basisAmount > 0,
+  );
+  if (!known.length) return "Unknown";
+  return known.map(([basisAsset, basisAmount]) => formatAmount(basisAmount, basisAsset)).join(" + ");
+}
+
+function formatFiatTotals(totals) {
+  const entries = Object.entries(totals);
+  if (!entries.length) return "None recorded";
+  return entries.map(([currency, amount]) => formatCurrency(amount, currency)).join(" + ");
+}
+
+function valueAsset(asset, amount, rates, baseCurrency = "EUR") {
   if (!rates) return null;
-  if (asset === "EUR") return amount;
+  if (asset === baseCurrency) return amount;
+  if (asset === "EUR") return convertEur(amount, rates, baseCurrency);
   if (FIAT.includes(asset)) {
     const perEur = rates.fx?.[asset];
-    return perEur ? amount / perEur : null;
+    return perEur ? convertEur(amount / perEur, rates, baseCurrency) : null;
   }
   const id = COINGECKO_IDS[asset];
-  return id && rates.crypto?.[id]?.eur ? amount * rates.crypto[id].eur : null;
+  const price = rates.crypto?.[id]?.[baseCurrency.toLowerCase()];
+  return id && price ? amount * price : null;
+}
+
+function formatBaseFromEur(value, rates, baseCurrency) {
+  const converted = convertEur(value, rates, baseCurrency);
+  return converted === null ? "No rate" : formatCurrency(converted, baseCurrency);
+}
+
+function convertEur(value, rates, baseCurrency) {
+  if (baseCurrency === "EUR") return value;
+  return rates?.fx?.USD ? value * rates.fx.USD : null;
 }
 
 function calculateFxDrag(rows, rates) {
@@ -878,7 +1006,7 @@ function formatFxCheck(row, rates) {
   if (!live) return `${implied.toFixed(4)} USD/EUR`;
   const idealEur = row.buyAmount / live;
   const drag = idealEur - row.sellAmount;
-  return `${implied.toFixed(4)} USD/EUR, ${formatEuro(drag)}`;
+  return `${implied.toFixed(4)} USD/EUR, ${formatCurrency(drag, "EUR")}`;
 }
 
 function download(filename, content, type) {

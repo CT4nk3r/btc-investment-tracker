@@ -158,9 +158,27 @@ input::placeholder {
   color: var(--muted);
   display: flex;
   gap: 14px;
-  justify-content: flex-end;
+  justify-content: space-between;
   min-height: 52px;
   padding: 8px 28px;
+}
+
+.account-nav,
+.account-user {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+}
+
+.account-nav a {
+  border-bottom: 2px solid transparent;
+  padding: 6px 0;
+}
+
+.account-nav a[aria-current="page"] {
+  border-color: var(--accent);
+  color: var(--ink);
+  font-weight: 800;
 }
 
 .public-shell {
@@ -406,6 +424,18 @@ h2 {
   min-height: 34px;
 }
 
+.base-currency {
+  align-items: center;
+  display: inline-flex;
+  font-size: 0.78rem;
+  gap: 6px;
+}
+
+.base-currency select {
+  min-height: 34px;
+  padding: 0 28px 0 9px;
+}
+
 .entry-band {
   background: var(--entry-bg);
   border-radius: 8px;
@@ -416,6 +446,30 @@ h2 {
   grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.8fr);
   margin-bottom: 18px;
   padding: 22px;
+}
+
+.funding-panel {
+  margin-bottom: 18px;
+}
+
+.funding-grid {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(130px, 0.7fr)) minmax(180px, 1fr) auto;
+}
+
+.funding-grid label {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.funding-grid input {
+  margin-top: 6px;
+}
+
+.funding-grid .primary {
+  min-height: 42px;
 }
 
 .entry-main label {
@@ -742,12 +796,175 @@ td {
   margin: 0;
 }
 
+.wallet-search-band {
+  display: block;
+}
+
+.wallet-search-grid {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(260px, 1.5fr) minmax(150px, 0.55fr) minmax(150px, 0.55fr) minmax(150px, 0.55fr) auto;
+}
+
+.wallet-search-grid label {
+  color: var(--entry-label);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.wallet-search-grid label input {
+  margin-top: 8px;
+}
+
+.wallet-search-grid .primary {
+  min-height: 42px;
+}
+
+.wallet-results > .panel-head svg {
+  color: var(--accent-dark);
+}
+
+.wallet-results-head,
+.wallet-import-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.wallet-import-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wallet-import-actions .primary {
+  min-height: 38px;
+}
+
+.wallet-table {
+  min-width: 1240px;
+}
+
+.wallet-table td {
+  vertical-align: top;
+}
+
+.wallet-table td:first-child,
+.wallet-table td:nth-last-child(-n + 3) {
+  white-space: nowrap;
+}
+
+.tx-type {
+  background: var(--subpanel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 800;
+  margin-bottom: 6px;
+  padding: 3px 7px;
+  text-transform: uppercase;
+}
+
+.tx-type.swap {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  color: var(--accent-dark);
+}
+
+.tx-type.transfer {
+  border-color: color-mix(in srgb, var(--green) 40%, var(--line));
+  color: var(--green);
+}
+
+.tx-summary {
+  display: block;
+  font-size: 0.88rem;
+  max-width: 280px;
+}
+
+.asset-list {
+  display: grid;
+  gap: 5px;
+}
+
+.asset-list span,
+.hash-link {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.asset-list.sent {
+  color: var(--red);
+}
+
+.asset-list.received {
+  color: var(--green);
+}
+
+.hash-link {
+  color: var(--blue);
+}
+
+.muted-text {
+  color: var(--muted);
+}
+
+.wallet-import-choice,
+.imported-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.wallet-import-choice {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.wallet-import-choice input {
+  min-height: auto;
+  width: auto;
+}
+
+.imported-label {
+  color: var(--green);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.failed-text {
+  color: var(--red);
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 800;
+  margin-top: 5px;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 @media (max-width: 920px) {
   .topbar,
   .entry-band,
+  .funding-grid,
   .content-grid,
-  .public-hero {
+  .public-hero,
+  .wallet-search-grid {
     grid-template-columns: 1fr;
+  }
+
+  .wallet-results-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .wallet-import-actions {
+    justify-content: flex-start;
   }
 
   .topbar {
@@ -789,6 +1006,8 @@ td {
   }
 
   .account-bar {
+    align-items: flex-start;
+    flex-direction: column;
     padding: 8px 16px;
   }
 }
