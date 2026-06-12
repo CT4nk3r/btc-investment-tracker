@@ -8,6 +8,7 @@ import {
   CalendarDays,
   CheckCircle2,
   FileJson,
+  FileCheck2,
   FileSpreadsheet,
   Landmark,
   Pencil,
@@ -41,6 +42,7 @@ import {
 } from "@/lib/ledger";
 import { readJsonResponse } from "@/lib/http";
 import { calculateLots, summarizeLotBasis } from "@/lib/cost-basis";
+import { buildTaxEvidence, taxEvidenceCsv, withIntegrityFingerprint } from "@/lib/tax-export";
 
 export default function TrackerApp() {
   const [rows, setRows] = useState([]);
@@ -188,6 +190,7 @@ export default function TrackerApp() {
       note: row.note || "",
       raw: row.raw || "",
       createdAt: row.createdAt,
+      sourceMetadata: row.sourceMetadata || {},
     });
   }
 
@@ -260,6 +263,7 @@ export default function TrackerApp() {
       "note",
       "raw",
       "created_at",
+      "source_metadata",
     ];
     const body = rows.map((row) =>
       [
@@ -273,11 +277,30 @@ export default function TrackerApp() {
         row.note,
         row.raw,
         row.createdAt,
+        JSON.stringify(row.sourceMetadata || {}),
       ]
         .map(csvCell)
         .join(","),
     );
     download(`btc-investment-tracker-${new Date().toISOString().slice(0, 10)}.csv`, [header.join(","), ...body].join("\n"), "text/csv;charset=utf-8");
+  }
+
+  function exportTaxCsv() {
+    const evidence = buildTaxEvidence({ rows, rates, baseCurrency });
+    download(
+      `btc-investment-tracker-tax-records-${new Date().toISOString().slice(0, 10)}.csv`,
+      taxEvidenceCsv(evidence),
+      "text/csv;charset=utf-8",
+    );
+  }
+
+  async function exportTaxEvidence() {
+    const evidence = await withIntegrityFingerprint(buildTaxEvidence({ rows, rates, baseCurrency }));
+    download(
+      `btc-investment-tracker-tax-evidence-${new Date().toISOString().slice(0, 10)}.json`,
+      JSON.stringify(evidence, null, 2),
+      "application/json",
+    );
   }
 
   function importFile(event) {
@@ -424,7 +447,7 @@ export default function TrackerApp() {
         <div className="panel-head ledger-actions">
           <div>
             <h2>Ledger</h2>
-            <span>Export this before tax filing or browser cleanup</span>
+            <span>Tax exports include source links, UTC timestamps, methodology, rates, and integrity metadata</span>
           </div>
           <div className="actions">
             <button onClick={exportCsv}>
@@ -434,6 +457,14 @@ export default function TrackerApp() {
             <button onClick={exportJson}>
               <FileJson size={16} />
               JSON
+            </button>
+            <button onClick={exportTaxCsv}>
+              <FileCheck2 size={16} />
+              Tax CSV
+            </button>
+            <button onClick={exportTaxEvidence}>
+              <FileCheck2 size={16} />
+              Evidence JSON
             </button>
             <label className="upload">
               <Upload size={16} />

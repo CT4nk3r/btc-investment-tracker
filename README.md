@@ -11,6 +11,8 @@ The authenticated wallet activity page can inspect Ethereum-compatible wallet ad
 
 Wallet imports use deterministic chain transaction IDs, so importing the same activity again does not create duplicates. Clear swaps become trades, incoming and outgoing transfers use an internal external-wallet balancing entry, and outgoing network fees become expense entries. Failed transactions, unsupported assets, and undecoded contract calls remain visible but cannot be imported.
 
+Wallet-imported ledger rows retain source evidence including chain, wallet address, transaction hash, explorer URL, block number, counterparty, method, status, fee, and complete sent/received asset flows. Searching a wallet also enriches matching older imports without creating new ledger rows.
+
 ## Run Locally
 
 ```bash
@@ -54,7 +56,9 @@ Current limitations:
 
 - JSON export is the canonical backup format.
 - CSV export is for spreadsheets and tax/accounting workflows.
+- Tax CSV adds source type, chain, transaction hash, explorer URL, UTC timestamp, asset flows, and unit-price columns for accountant review.
+- Evidence JSON includes all ledger records, source links, calculation methodology, current holdings and basis summary, the export-time rate snapshot, and a SHA-256 integrity fingerprint.
 - Import supports JSON backups, older raw JSON ledger arrays, and CSV files exported by the app.
 - If an old browser-local ledger exists, the dashboard offers to merge it into the logged-in account.
 
-This is a tax filing helper, not tax advice.
+The evidence package is supporting documentation, not a guarantee of acceptance by a tax authority. Keep exchange statements, bank records, and explorer records alongside it. This is a tax filing helper, not tax advice.

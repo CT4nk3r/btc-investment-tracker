@@ -114,6 +114,25 @@ describe("import/export", () => {
     expect(result.validRows[0].sellAsset).toBe("EXTERNAL_WALLET");
   });
 
+  it("preserves structured wallet source metadata", () => {
+    const result = normalizeImportedRows([
+      {
+        ...row,
+        source_metadata: JSON.stringify({
+          sourceType: "wallet_import",
+          chainId: "polygon",
+          transactionHash: "0xabc",
+        }),
+      },
+    ]);
+
+    expect(result.validRows[0].sourceMetadata).toEqual({
+      sourceType: "wallet_import",
+      chainId: "polygon",
+      transactionHash: "0xabc",
+    });
+  });
+
   it("builds an import preview with existing duplicate detection", () => {
     const preview = buildImportPreview(JSON.stringify({ rows: [row] }), "backup.json", [row]);
     expect(preview.validRows).toHaveLength(1);
@@ -121,7 +140,10 @@ describe("import/export", () => {
   });
 
   it("exports only portable row fields", () => {
-    expect(cleanExportRow({ ...row, userId: "secret", updatedAt: "ignored" })).toEqual(row);
+    expect(cleanExportRow({ ...row, userId: "secret", updatedAt: "ignored" })).toEqual({
+      ...row,
+      sourceMetadata: {},
+    });
   });
 
   it("formats supported base currencies", () => {

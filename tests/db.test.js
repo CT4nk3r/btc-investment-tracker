@@ -13,11 +13,13 @@ describe("database ledger serialization", () => {
       sell_amount: "100",
       sell_asset: "USDC",
       note: "",
+      source_metadata: { sourceType: "wallet_import" },
       created_at: new Date("2026-06-05T12:00:00.000Z"),
     });
 
     expect(row.date).toBe("2026-06-05");
     expect(row.createdAt).toBe("2026-06-05T12:00:00.000Z");
+    expect(row.sourceMetadata).toEqual({ sourceType: "wallet_import" });
     expect(() => sortRows([row])).not.toThrow();
   });
 

@@ -74,6 +74,9 @@ export default function WalletTransactions() {
       if (!ledgerResponse.ok) throw new Error(ledgerData.error || "Could not check existing ledger imports");
       const nextTransactions = data.transactions || [];
       const existingIds = new Set((ledgerData.rows || []).map((row) => row.id));
+      const existingWalletRows = nextTransactions
+        .flatMap((transaction) => walletTransactionToLedgerRows(transaction, chain))
+        .filter((row) => existingIds.has(row.id));
       setTransactions(nextTransactions);
       setMeta(data.meta || null);
       setSelectedHashes([]);
@@ -86,12 +89,26 @@ export default function WalletTransactions() {
           .map((transaction) => transaction.hash),
       );
       setImportMessage("");
+      syncExistingWalletEvidence(existingWalletRows);
     } catch (searchError) {
       setTransactions([]);
       setMeta(null);
       setError(searchError.message || "Could not load wallet activity");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function syncExistingWalletEvidence(existingRows) {
+    if (!existingRows.length) return;
+    try {
+      await fetch("/api/ledger/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "merge", rows: existingRows }),
+      });
+    } catch {
+      // Evidence enrichment is best-effort and must not block wallet search results.
     }
   }
 

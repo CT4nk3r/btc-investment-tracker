@@ -158,6 +158,11 @@ describe("wallet transaction normalization", () => {
         buyAsset: "WBTC",
         sellAmount: 100,
         sellAsset: "USDC",
+        sourceMetadata: expect.objectContaining({
+          sourceType: "wallet_import",
+          chainId: "polygon",
+          transactionHash: "0xSWAP",
+        }),
       }),
       expect.objectContaining({
         id: "wallet:polygon:0xswap:fee",
