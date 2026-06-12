@@ -64,13 +64,27 @@ export default function WalletTransactions() {
     setHasSearched(true);
     try {
       const params = new URLSearchParams({ address: address.trim(), chain, startDate, endDate });
-      const response = await fetch(`/api/wallet-transactions?${params}`, { cache: "no-store" });
-      const data = (await readJsonResponse(response)) || {};
-      if (!response.ok) throw new Error(data.error || "Could not load wallet activity");
-      setTransactions(data.transactions || []);
+      const [walletResponse, ledgerResponse] = await Promise.all([
+        fetch(`/api/wallet-transactions?${params}`, { cache: "no-store" }),
+        fetch("/api/ledger", { cache: "no-store" }),
+      ]);
+      const data = (await readJsonResponse(walletResponse)) || {};
+      const ledgerData = (await readJsonResponse(ledgerResponse)) || {};
+      if (!walletResponse.ok) throw new Error(data.error || "Could not load wallet activity");
+      if (!ledgerResponse.ok) throw new Error(ledgerData.error || "Could not check existing ledger imports");
+      const nextTransactions = data.transactions || [];
+      const existingIds = new Set((ledgerData.rows || []).map((row) => row.id));
+      setTransactions(nextTransactions);
       setMeta(data.meta || null);
       setSelectedHashes([]);
-      setImportedHashes([]);
+      setImportedHashes(
+        nextTransactions
+          .filter((transaction) => {
+            const transactionRows = walletTransactionToLedgerRows(transaction, chain);
+            return transactionRows.length && transactionRows.every((row) => existingIds.has(row.id));
+          })
+          .map((transaction) => transaction.hash),
+      );
       setImportMessage("");
     } catch (searchError) {
       setTransactions([]);
@@ -113,9 +127,12 @@ export default function WalletTransactions() {
       const data = (await readJsonResponse(response)) || {};
       if (!response.ok) throw new Error(data.error || "Could not import wallet transactions");
       setImportedHashes((current) => [...new Set([...current, ...selectedHashes])]);
-      setImportMessage(
-        `${selectedRows.length.toLocaleString()} ledger ${selectedRows.length === 1 ? "row was" : "rows were"} processed.`,
-      );
+      const importedCount = data.importedCount ?? selectedRows.length;
+      const skippedCount = data.skippedDuplicateCount ?? 0;
+      setImportMessage([
+        `${importedCount.toLocaleString()} new ledger ${importedCount === 1 ? "row was" : "rows were"} imported.`,
+        skippedCount ? `${skippedCount.toLocaleString()} duplicate ${skippedCount === 1 ? "row was" : "rows were"} skipped.` : "",
+      ].filter(Boolean).join(" "));
       setSelectedHashes([]);
     } catch (importError) {
       setError(importError.message || "Could not import wallet transactions");
