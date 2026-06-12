@@ -39,6 +39,7 @@ import {
   withoutSampleRows,
 } from "@/lib/ledger";
 import { readJsonResponse } from "@/lib/http";
+import { calculateLots, summarizeLotBasis } from "@/lib/cost-basis";
 
 export default function TrackerApp() {
   const [rows, setRows] = useState([]);
@@ -564,12 +565,13 @@ function Holdings({ balances, rates, lots, isLoading }) {
         <tbody>
           {visible.map(([asset, amount]) => {
             const cost = (lots[asset] || []).reduce((sum, lot) => sum + (lot.costEur || 0), 0);
+            const basis = summarizeLotBasis(lots[asset]);
             const live = valueAsset(asset, amount, rates);
             return (
               <tr key={asset}>
                 <td>{asset}</td>
                 <td>{formatAmount(amount)}</td>
-                <td>{cost ? formatEuro(cost) : asset === "EUR" ? formatEuro(amount) : "Unknown"}</td>
+                <td>{formatCostBasis({ asset, amount, cost, basis })}</td>
                 <td>{live ? formatEuro(live) : "No rate"}</td>
               </tr>
             );
@@ -787,55 +789,6 @@ function holdingsFromRows(rows) {
   return balances;
 }
 
-function calculateLots(rows) {
-  const pools = {};
-  const realized = [];
-
-  for (const row of [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))) {
-    const fromCost = takeCost(pools, row.sellAsset, row.sellAmount);
-    const inferredEurCost =
-      fromCost.costEur > 0 ? fromCost.costEur : row.sellAsset === "EUR" ? row.sellAmount : undefined;
-
-    if (!pools[row.buyAsset]) pools[row.buyAsset] = [];
-    pools[row.buyAsset].push({
-      amount: row.buyAmount,
-      costEur: inferredEurCost,
-      sourceId: row.id,
-      date: row.date,
-    });
-
-    if (fromCost.costEur > 0 && row.sellAsset !== "EUR") {
-      realized.push({
-        row,
-        asset: row.sellAsset,
-        disposedAmount: row.sellAmount,
-        costEur: fromCost.costEur,
-        proceedsEur: inferredEurCost,
-      });
-    }
-  }
-
-  return { pools, realized };
-}
-
-function takeCost(pools, asset, amount) {
-  if (asset === "EUR") return { costEur: amount };
-  if (!pools[asset]) return { costEur: 0 };
-  let remaining = amount;
-  let costEur = 0;
-  for (const lot of pools[asset]) {
-    if (remaining <= 0) break;
-    const used = Math.min(lot.amount, remaining);
-    const ratio = lot.amount ? used / lot.amount : 0;
-    costEur += (lot.costEur || 0) * ratio;
-    lot.amount -= used;
-    lot.costEur = (lot.costEur || 0) * (1 - ratio);
-    remaining -= used;
-  }
-  pools[asset] = pools[asset].filter((lot) => lot.amount > 0.000000000001);
-  return { costEur };
-}
-
 function valuePortfolio(balances, rates) {
   if (!rates) return null;
   return {
@@ -843,6 +796,17 @@ function valuePortfolio(balances, rates) {
       .filter(([asset]) => !INTERNAL_ASSETS.includes(asset))
       .reduce((sum, [asset, amount]) => sum + (valueAsset(asset, amount, rates) || 0), 0),
   };
+}
+
+function formatCostBasis({ asset, amount, cost, basis }) {
+  if (cost) return formatEuro(cost);
+  if (asset === "EUR") return formatEuro(amount);
+
+  const known = Object.entries(basis).filter(
+    ([basisAsset, basisAmount]) => !INTERNAL_ASSETS.includes(basisAsset) && basisAmount > 0,
+  );
+  if (!known.length) return "Unknown";
+  return known.map(([basisAsset, basisAmount]) => formatAmount(basisAmount, basisAsset)).join(" + ");
 }
 
 function valueAsset(asset, amount, rates) {
