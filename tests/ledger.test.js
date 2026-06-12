@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildImportPreview,
   cleanExportRow,
+  formatCurrency,
   normalizeImportedRows,
   parseCsv,
   parseJsonRows,
@@ -121,5 +122,10 @@ describe("import/export", () => {
 
   it("exports only portable row fields", () => {
     expect(cleanExportRow({ ...row, userId: "secret", updatedAt: "ignored" })).toEqual(row);
+  });
+
+  it("formats supported base currencies", () => {
+    expect(formatCurrency(584.48, "EUR")).toContain("584.48");
+    expect(formatCurrency(677, "USD")).toContain("677");
   });
 });

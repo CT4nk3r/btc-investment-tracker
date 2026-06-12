@@ -424,6 +424,18 @@ h2 {
   min-height: 34px;
 }
 
+.base-currency {
+  align-items: center;
+  display: inline-flex;
+  font-size: 0.78rem;
+  gap: 6px;
+}
+
+.base-currency select {
+  min-height: 34px;
+  padding: 0 28px 0 9px;
+}
+
 .entry-band {
   background: var(--entry-bg);
   border-radius: 8px;

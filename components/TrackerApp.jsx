@@ -22,6 +22,7 @@ import {
 import {
   ASSETS,
   BACKUP_SCHEMA_VERSION,
+  BASE_CURRENCY_KEY,
   COINGECKO_IDS,
   FIAT,
   INTERNAL_ASSETS,
@@ -32,7 +33,7 @@ import {
   cleanExportRow,
   csvCell,
   formatAmount,
-  formatEuro,
+  formatCurrency,
   normalizeImportedRows,
   parseTrade,
   sortRows,
@@ -64,11 +65,15 @@ export default function TrackerApp() {
     }
   });
   const [rateState, setRateState] = useState("idle");
+  const [baseCurrency, setBaseCurrency] = useState(() => {
+    if (typeof window === "undefined") return "EUR";
+    return window.localStorage.getItem(BASE_CURRENCY_KEY) === "USD" ? "USD" : "EUR";
+  });
 
   const parsed = useMemo(() => parseTrade(phrase), [phrase]);
   const balances = useMemo(() => holdingsFromRows(rows), [rows]);
   const lots = useMemo(() => calculateLots(rows), [rows]);
-  const portfolio = useMemo(() => valuePortfolio(balances, rates), [balances, rates]);
+  const portfolio = useMemo(() => valuePortfolio(balances, rates, baseCurrency), [balances, rates, baseCurrency]);
   const fxLoss = useMemo(() => calculateFxDrag(rows, rates), [rows, rates]);
 
   useEffect(() => {
@@ -114,6 +119,12 @@ export default function TrackerApp() {
     } catch {
       setRateState("failed");
     }
+  }
+
+  function changeBaseCurrency(value) {
+    const next = value === "USD" ? "USD" : "EUR";
+    window.localStorage.setItem(BASE_CURRENCY_KEY, next);
+    setBaseCurrency(next);
   }
 
   async function addTrade() {
@@ -325,6 +336,13 @@ export default function TrackerApp() {
         <div className="rate-pill">
           <RefreshCcw size={16} />
           <span>{rates ? `Rates ${new Date(rates.updatedAt).toLocaleString()}` : "No live rates yet"}</span>
+          <label className="base-currency">
+            Display
+            <select value={baseCurrency} onChange={(event) => changeBaseCurrency(event.target.value)}>
+              <option value="EUR">EUR</option>
+              <option value="USD">USD</option>
+            </select>
+          </label>
           <button onClick={refreshRates} aria-label="Refresh exchange rates">
             Refresh
           </button>
@@ -379,8 +397,8 @@ export default function TrackerApp() {
 
       <section className="stats-grid">
         <Stat icon={<Bitcoin />} label="BTC held" value={formatAmount(balances.BTC, "BTC")} />
-        <Stat icon={<WalletCards />} label="Portfolio est." value={portfolio ? formatEuro(portfolio.eur) : "Waiting for rates"} />
-        <Stat icon={<ArrowDownUp />} label="EUR -> stable drag" value={formatEuro(fxLoss.dragEur)} tone={fxLoss.dragEur < 0 ? "bad" : "good"} />
+        <Stat icon={<WalletCards />} label={`Portfolio est. (${baseCurrency})`} value={portfolio ? formatCurrency(portfolio.value, baseCurrency) : "Waiting for rates"} />
+        <Stat icon={<ArrowDownUp />} label="EUR -> stable drag" value={formatBaseFromEur(fxLoss.dragEur, rates, baseCurrency)} tone={fxLoss.dragEur < 0 ? "bad" : "good"} />
         <Stat icon={<Landmark />} label="Tracked records" value={rows.length.toLocaleString()} />
       </section>
 
@@ -390,7 +408,7 @@ export default function TrackerApp() {
             <h2>Holdings</h2>
             <span>{rateState === "failed" ? "Live rates unavailable" : "Live value where supported"}</span>
           </div>
-          <Holdings balances={balances} rates={rates} lots={lots.pools} isLoading={isLoadingRows} />
+          <Holdings balances={balances} rates={rates} lots={lots.pools} baseCurrency={baseCurrency} isLoading={isLoadingRows} />
         </div>
 
         <div className="panel">
@@ -398,7 +416,7 @@ export default function TrackerApp() {
             <h2>Tax Helpers</h2>
             <span>FIFO cost tracking</span>
           </div>
-          <TaxSummary rows={rows} lots={lots} fxLoss={fxLoss} rates={rates} />
+          <TaxSummary rows={rows} lots={lots} fxLoss={fxLoss} rates={rates} baseCurrency={baseCurrency} />
         </div>
       </section>
 
@@ -543,7 +561,7 @@ function Stat({ icon, label, value, tone }) {
   );
 }
 
-function Holdings({ balances, rates, lots, isLoading }) {
+function Holdings({ balances, rates, lots, baseCurrency, isLoading }) {
   const visible = Object.entries(balances)
     .filter(([asset, amount]) => !INTERNAL_ASSETS.includes(asset) && Math.abs(amount) > 0.00000001)
     .sort(([a], [b]) => (a === "BTC" ? -1 : b === "BTC" ? 1 : a.localeCompare(b)));
@@ -566,13 +584,13 @@ function Holdings({ balances, rates, lots, isLoading }) {
           {visible.map(([asset, amount]) => {
             const cost = (lots[asset] || []).reduce((sum, lot) => sum + (lot.costEur || 0), 0);
             const basis = summarizeLotBasis(lots[asset]);
-            const live = valueAsset(asset, amount, rates);
+            const live = valueAsset(asset, amount, rates, baseCurrency);
             return (
               <tr key={asset}>
                 <td>{asset}</td>
                 <td>{formatAmount(amount)}</td>
-                <td>{formatCostBasis({ asset, amount, cost, basis })}</td>
-                <td>{live ? formatEuro(live) : "No rate"}</td>
+                <td>{formatCostBasis({ asset, amount, cost, basis, rates, baseCurrency })}</td>
+                <td>{live ? formatCurrency(live, baseCurrency) : "No rate"}</td>
               </tr>
             );
           })}
@@ -582,7 +600,7 @@ function Holdings({ balances, rates, lots, isLoading }) {
   );
 }
 
-function TaxSummary({ rows, lots, fxLoss, rates }) {
+function TaxSummary({ rows, lots, fxLoss, rates, baseCurrency }) {
   const btcBuys = rows.filter((row) => row.buyAsset === "BTC");
   const eurSpent = rows.filter((row) => row.sellAsset === "EUR").reduce((sum, row) => sum + row.sellAmount, 0);
   const btcCost = (lots.pools.BTC || [])
@@ -594,11 +612,11 @@ function TaxSummary({ rows, lots, fxLoss, rates }) {
     <div className="tax-grid">
       <div>
         <span>EUR spent into crypto</span>
-        <strong>{formatEuro(eurSpent)}</strong>
+        <strong>{formatBaseFromEur(eurSpent, rates, baseCurrency)}</strong>
       </div>
       <div>
         <span>Open FIFO basis</span>
-        <strong>{formatEuro(btcCost)}</strong>
+        <strong>{formatBaseFromEur(btcCost, rates, baseCurrency)}</strong>
       </div>
       <div>
         <span>BTC buy count</span>
@@ -606,7 +624,7 @@ function TaxSummary({ rows, lots, fxLoss, rates }) {
       </div>
       <div>
         <span>Stablecoin FX drag</span>
-        <strong className={fxLoss.dragEur < 0 ? "bad-text" : "good-text"}>{formatEuro(fxLoss.dragEur)}</strong>
+        <strong className={fxLoss.dragEur < 0 ? "bad-text" : "good-text"}>{formatBaseFromEur(fxLoss.dragEur, rates, baseCurrency)}</strong>
       </div>
       <div>
         <span>Current USD per EUR</span>
@@ -789,18 +807,18 @@ function holdingsFromRows(rows) {
   return balances;
 }
 
-function valuePortfolio(balances, rates) {
+function valuePortfolio(balances, rates, baseCurrency) {
   if (!rates) return null;
   return {
-    eur: Object.entries(balances)
+    value: Object.entries(balances)
       .filter(([asset]) => !INTERNAL_ASSETS.includes(asset))
-      .reduce((sum, [asset, amount]) => sum + (valueAsset(asset, amount, rates) || 0), 0),
+      .reduce((sum, [asset, amount]) => sum + (valueAsset(asset, amount, rates, baseCurrency) || 0), 0),
   };
 }
 
-function formatCostBasis({ asset, amount, cost, basis }) {
-  if (cost) return formatEuro(cost);
-  if (asset === "EUR") return formatEuro(amount);
+function formatCostBasis({ asset, amount, cost, basis, rates, baseCurrency }) {
+  if (cost) return formatBaseFromEur(cost, rates, baseCurrency);
+  if (asset === "EUR") return formatBaseFromEur(amount, rates, baseCurrency);
 
   const known = Object.entries(basis).filter(
     ([basisAsset, basisAmount]) => !INTERNAL_ASSETS.includes(basisAsset) && basisAmount > 0,
@@ -809,15 +827,27 @@ function formatCostBasis({ asset, amount, cost, basis }) {
   return known.map(([basisAsset, basisAmount]) => formatAmount(basisAmount, basisAsset)).join(" + ");
 }
 
-function valueAsset(asset, amount, rates) {
+function valueAsset(asset, amount, rates, baseCurrency = "EUR") {
   if (!rates) return null;
-  if (asset === "EUR") return amount;
+  if (asset === baseCurrency) return amount;
+  if (asset === "EUR") return convertEur(amount, rates, baseCurrency);
   if (FIAT.includes(asset)) {
     const perEur = rates.fx?.[asset];
-    return perEur ? amount / perEur : null;
+    return perEur ? convertEur(amount / perEur, rates, baseCurrency) : null;
   }
   const id = COINGECKO_IDS[asset];
-  return id && rates.crypto?.[id]?.eur ? amount * rates.crypto[id].eur : null;
+  const price = rates.crypto?.[id]?.[baseCurrency.toLowerCase()];
+  return id && price ? amount * price : null;
+}
+
+function formatBaseFromEur(value, rates, baseCurrency) {
+  const converted = convertEur(value, rates, baseCurrency);
+  return converted === null ? "No rate" : formatCurrency(converted, baseCurrency);
+}
+
+function convertEur(value, rates, baseCurrency) {
+  if (baseCurrency === "EUR") return value;
+  return rates?.fx?.USD ? value * rates.fx.USD : null;
 }
 
 function calculateFxDrag(rows, rates) {
@@ -845,7 +875,7 @@ function formatFxCheck(row, rates) {
   if (!live) return `${implied.toFixed(4)} USD/EUR`;
   const idealEur = row.buyAmount / live;
   const drag = idealEur - row.sellAmount;
-  return `${implied.toFixed(4)} USD/EUR, ${formatEuro(drag)}`;
+  return `${implied.toFixed(4)} USD/EUR, ${formatCurrency(drag, "EUR")}`;
 }
 
 function download(filename, content, type) {
